@@ -1,0 +1,1123 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>FactoryFlow — Gestión Industrial</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { display:['Outfit','sans-serif'], body:['DM Sans','sans-serif'] },
+          colors: {
+            brand:{ 50:'#FFF8ED',100:'#FFEFD4',200:'#FFDBA8',300:'#FFC170',400:'#FF9F36',500:'#E07A2F',600:'#C4591A',700:'#9A4015' },
+            surface:{ 50:'#FAFAF7',100:'#F3F2EE',200:'#E6E4DD' },
+            ind:{ dark:'#1B1B1F',steel:'#3F3F46',iron:'#71717A',concrete:'#A1A1AA' }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    :root{ --sidebar-w:260px; }
+    *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+    body{ font-family:'DM Sans',sans-serif; background:#F5F4F0; color:#1B1B1F; overscroll-behavior:none; }
+    h1,h2,h3,h4{ font-family:'Outfit',sans-serif; }
+    ::-webkit-scrollbar{ width:4px; height:4px; }
+    ::-webkit-scrollbar-thumb{ background:#c4c2bb; border-radius:3px; }
+
+    /* SIDEBAR */
+    .sidebar{ width:var(--sidebar-w); min-width:var(--sidebar-w); transition:transform .3s,width .3s; position:relative; z-index:40; }
+    @media(max-width:767px){
+      .sidebar{ position:fixed; top:0; left:0; bottom:0; transform:translateX(-100%); z-index:60; }
+      .sidebar.open{ transform:translateX(0); }
+      #sidebarOverlay{ display:none; position:fixed; inset:0; background:rgba(0,0,0,.45); backdrop-filter:blur(2px); z-index:55; }
+      #sidebarOverlay.show{ display:block; }
+    }
+    @media(min-width:768px){
+      .sidebar.collapsed{ width:0; min-width:0; overflow:hidden; }
+      #sidebarOverlay{ display:none!important; }
+    }
+
+    /* KANBAN */
+    .kanban-col{ min-height:200px; transition:background .2s; }
+    .kanban-col.drag-over{ background:rgba(224,122,47,.08); border:2px dashed #E07A2F; }
+    .board-scroll-container{ overflow-x:auto; -webkit-overflow-scrolling:touch; scroll-snap-type:x mandatory; }
+    .board-inner{ display:flex; gap:1rem; min-width:max-content; align-items:flex-start; }
+    .board-column-wrapper{ width:300px; flex-shrink:0; scroll-snap-align:start; }
+    @media(min-width:768px){
+      .board-scroll-container{ overflow-x:visible; }
+      .board-inner{ display:grid; grid-template-columns:repeat(4,1fr); min-width:unset; }
+      .board-column-wrapper{ width:auto; }
+    }
+    @media(min-width:768px) and (max-width:1199px){ .board-inner{ grid-template-columns:repeat(2,1fr); } }
+
+    /* CARDS */
+    .task-card{ cursor:pointer; touch-action:manipulation; transition:all .2s; border-left:4px solid transparent; }
+    .task-card:hover{ transform:translateY(-2px); box-shadow:0 8px 24px rgba(0,0,0,.1); }
+    .task-card.dragging{ opacity:.4; transform:rotate(2deg) scale(1.02); }
+    .task-card.prio-alta{ border-left-color:#DC2626; }
+    .task-card.prio-media{ border-left-color:#F59E0B; }
+    .task-card.prio-baja{ border-left-color:#10B981; }
+    .drag-handle{ touch-action:none; cursor:grab; color:#A1A1AA; padding:2px 4px; border-radius:4px; }
+    .drag-handle:active{ cursor:grabbing; color:#E07A2F; }
+    @media(min-width:768px){ .drag-handle{ display:none; } }
+
+    .avatar{ border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:700; color:#fff; flex-shrink:0; }
+    .modal-overlay{ background:rgba(0,0,0,.45); backdrop-filter:blur(4px); }
+    .modal-content{ animation:slideUp .3s ease; }
+    @keyframes slideUp{ from{ opacity:0; transform:translateY(20px); } to{ opacity:1; transform:translateY(0); } }
+    @media(max-width:640px){
+      .modal-content{ position:fixed!important; bottom:0; left:0; right:0; max-height:92vh!important; border-radius:20px 20px 0 0!important; animation:slideUpSheet .3s ease; }
+      @keyframes slideUpSheet{ from{ transform:translateY(100%); } to{ transform:translateY(0); } }
+    }
+
+    .toast{ animation:toastIn .3s ease; }
+    @keyframes toastIn{ from{ opacity:0; transform:translateX(80px); } to{ opacity:1; transform:translateX(0); } }
+    .dept-badge{ font-size:10px; padding:2px 8px; border-radius:9999px; font-weight:600; letter-spacing:.3px; text-transform:uppercase; }
+    .nav-item{ transition:all .15s; border-radius:10px; }
+    .nav-item:hover{ background:rgba(255,255,255,.08); }
+    .nav-item.active{ background:rgba(224,122,47,.15); color:#FF9F36; }
+
+    @keyframes pulse-red{ 0%,100%{ box-shadow:0 0 0 0 rgba(220,38,38,.2); } 50%{ box-shadow:0 0 0 8px rgba(220,38,38,0); } }
+    .pulse-atrasada{ animation:pulse-red 2s infinite; }
+    .btn-primary{ background:linear-gradient(135deg,#E07A2F,#C4591A); transition:all .2s; }
+    .btn-primary:hover{ box-shadow:0 4px 16px rgba(224,122,47,.35); transform:translateY(-1px); }
+    .bg-pattern{ background-image:radial-gradient(circle at 1px 1px,rgba(0,0,0,.03) 1px,transparent 0); background-size:24px 24px; }
+
+    #fab{ display:none; position:fixed; bottom:24px; right:20px; z-index:50; width:56px; height:56px; border-radius:50%; box-shadow:0 6px 24px rgba(224,122,47,.45); }
+    @media(max-width:767px){ #fab{ display:flex; } .btn-nueva-header{ display:none!important; } main{ padding-bottom:64px; } }
+    #mobileNav{ display:none; position:fixed; bottom:0; left:0; right:0; background:#1B1B1F; z-index:50; padding:8px 0 max(8px,env(safe-area-inset-bottom)); border-top:1px solid rgba(255,255,255,.08); }
+    @media(max-width:767px){ #mobileNav{ display:flex; } }
+    @media print{ .no-print{ display:none!important; } body{ background:#fff; } }
+
+    /* MULTI-SELECT CHIPS */
+    .chips-container{ display:flex; flex-wrap:wrap; gap:6px; min-height:40px; padding:6px 8px; border:1px solid #E6E4DD; border-radius:12px; cursor:text; background:#fff; transition:box-shadow .15s; }
+    .chips-container:focus-within{ box-shadow:0 0 0 2px #FFC170; border-color:#FF9F36; }
+    .chip{ display:flex; align-items:center; gap:4px; background:#FFF8ED; border:1px solid #FFDBA8; color:#C4591A; border-radius:9999px; padding:2px 8px; font-size:11px; font-weight:600; }
+    .chip button{ display:flex; align-items:center; justify-content:center; width:14px; height:14px; border-radius:50%; background:#FFDBA8; color:#C4591A; cursor:pointer; border:none; font-size:9px; }
+    .chip button:hover{ background:#E07A2F; color:#fff; }
+    .chip-dept{ background:#EEF2FF; border-color:#C7D2FE; color:#4338CA; }
+    .chip-dept button{ background:#C7D2FE; color:#4338CA; }
+    .chip-dept button:hover{ background:#4338CA; color:#fff; }
+    .dropdown-list{ position:absolute; z-index:200; background:#fff; border:1px solid #E6E4DD; border-radius:12px; box-shadow:0 8px 24px rgba(0,0,0,.12); max-height:200px; overflow-y:auto; width:100%; }
+    .dropdown-item{ padding:8px 12px; font-size:13px; cursor:pointer; display:flex; align-items:center; gap:8px; transition:background .1s; }
+    .dropdown-item:hover{ background:#F5F4F0; }
+    .dropdown-item.selected{ background:#FFF8ED; color:#C4591A; font-weight:600; }
+
+    /* LOADING */
+    #loadingOverlay{ position:fixed; inset:0; background:#1B1B1F; display:flex; flex-direction:column; align-items:center; justify-content:center; z-index:9999; transition:opacity .4s; }
+    #loadingOverlay.fade-out{ opacity:0; pointer-events:none; }
+    .spinner{ width:40px; height:40px; border:3px solid rgba(255,255,255,.1); border-top-color:#E07A2F; border-radius:50%; animation:spin .8s linear infinite; }
+    @keyframes spin{ to{ transform:rotate(360deg); } }
+
+    /* CONFIG BANNER */
+    #configBanner{ display:none; }
+    #configBanner.show{ display:flex; }
+
+    /* MGMT TABS */
+    .mgmt-tab{ padding:8px 16px; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; transition:all .15s; }
+    .mgmt-tab.active{ background:#E07A2F; color:#fff; }
+    .mgmt-tab:not(.active){ color:#71717A; }
+    .mgmt-tab:not(.active):hover{ background:#F5F4F0; }
+    .person-row,.dept-row{ display:flex; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid #F3F2EE; }
+    .person-row:last-child,.dept-row:last-child{ border-bottom:none; }
+
+    .col-scroll-hint{ display:none; font-size:11px; color:#A1A1AA; text-align:center; padding:4px 0 0; }
+    @media(max-width:767px){ .col-scroll-hint{ display:block; } }
+  </style>
+</head>
+<body class="bg-pattern min-h-screen flex">
+
+<!-- LOADING -->
+<div id="loadingOverlay">
+  <div class="w-10 h-10 rounded-xl bg-brand-500 flex items-center justify-center mb-4">
+    <i class="fas fa-industry text-white text-lg"></i>
+  </div>
+  <p class="text-white font-display font-700 text-xl mb-2">FactoryFlow</p>
+  <p id="loadingMsg" class="text-white/40 text-sm mb-6">Conectando con la base de datos...</p>
+  <div class="spinner"></div>
+</div>
+
+<!-- CONFIG BANNER -->
+<div id="configBanner" class="fixed top-0 left-0 right-0 z-[9998] bg-amber-500 text-white px-4 py-3 items-center gap-3 no-print">
+  <i class="fas fa-triangle-exclamation flex-shrink-0"></i>
+  <p class="text-sm flex-1"><strong>Configura Supabase:</strong> Edita el archivo <code class="bg-white/20 px-1 rounded">config.js</code> con tu URL y clave anónima de Supabase.</p>
+  <a href="#" onclick="document.getElementById('configBanner').classList.remove('show')" class="flex-shrink-0 text-white/70 hover:text-white"><i class="fas fa-xmark"></i></a>
+</div>
+
+<div id="sidebarOverlay" onclick="closeSidebarMobile()"></div>
+
+<!-- SIDEBAR -->
+<aside id="sidebar" class="sidebar bg-ind-dark text-white flex flex-col no-print h-screen sticky top-0 overflow-y-auto">
+  <div class="p-5 border-b border-white/10 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <div class="w-9 h-9 rounded-lg bg-brand-500 flex items-center justify-center flex-shrink-0">
+        <i class="fas fa-industry text-sm"></i>
+      </div>
+      <div>
+        <h1 class="font-display font-800 text-base tracking-tight">FactoryFlow</h1>
+        <p class="text-[10px] text-white/40 uppercase tracking-widest">Gestión Industrial</p>
+      </div>
+    </div>
+    <button class="md:hidden w-8 h-8 rounded-lg hover:bg-white/10 flex items-center justify-center text-white/50" onclick="closeSidebarMobile()">
+      <i class="fas fa-xmark"></i>
+    </button>
+  </div>
+  <nav class="flex-1 p-3 space-y-1">
+    <button onclick="switchView('board')" class="nav-item active w-full flex items-center gap-3 px-4 py-2.5 text-sm" data-nav="board">
+      <i class="fas fa-columns w-5 text-center"></i> Tablero
+    </button>
+    <button onclick="switchView('history')" class="nav-item w-full flex items-center gap-3 px-4 py-2.5 text-sm" data-nav="history">
+      <i class="fas fa-clock-rotate-left w-5 text-center"></i> Historial
+    </button>
+    <button onclick="openManagementModal()" class="nav-item w-full flex items-center gap-3 px-4 py-2.5 text-sm text-white/70">
+      <i class="fas fa-users-gear w-5 text-center"></i> Gestionar Equipos
+    </button>
+    <div class="pt-4 pb-2 px-4">
+      <p class="text-[10px] text-white/30 uppercase tracking-widest font-semibold">Departamentos</p>
+    </div>
+    <div id="sidebar-depts" class="space-y-0.5"></div>
+  </nav>
+  <div class="p-4 border-t border-white/10">
+    <div class="flex items-center gap-3">
+      <div class="avatar bg-brand-500" style="width:32px;height:32px;font-size:11px">AD</div>
+      <div class="flex-1 min-w-0">
+        <p class="text-sm font-medium">Administrador</p>
+        <p class="text-[11px] text-white/40" id="dbStatus">Conectando...</p>
+      </div>
+    </div>
+  </div>
+</aside>
+
+<!-- MAIN -->
+<main class="flex-1 flex flex-col min-w-0">
+  <header class="bg-white/80 backdrop-blur-lg border-b border-surface-200 px-4 md:px-6 py-3 flex items-center gap-3 no-print sticky top-0 z-30">
+    <button onclick="toggleSidebar()" class="w-9 h-9 rounded-lg hover:bg-surface-100 flex items-center justify-center text-ind-iron transition">
+      <i class="fas fa-bars"></i>
+    </button>
+    <div class="flex-1 relative max-w-md">
+      <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-ind-concrete text-sm"></i>
+      <input id="searchInput" type="search" placeholder="Buscar tareas, responsables..."
+        class="w-full pl-9 pr-4 py-2 rounded-xl bg-surface-50 border border-surface-200 text-sm focus:outline-none focus:ring-2 focus:ring-brand-300 transition"
+        oninput="handleSearch(this.value)">
+    </div>
+    <div class="flex items-center gap-2 ml-auto">
+      <button onclick="checkOverdueAndNotify()" class="relative w-9 h-9 rounded-lg hover:bg-surface-100 flex items-center justify-center text-ind-iron transition">
+        <i class="fas fa-bell"></i>
+        <span id="notifBadge" class="hidden absolute -top-0.5 -right-0.5 w-4 h-4 bg-red-500 text-white text-[9px] rounded-full items-center justify-center font-bold"></span>
+      </button>
+      <button onclick="showExportModal()" class="w-9 h-9 rounded-lg hover:bg-surface-100 flex items-center justify-center text-ind-iron transition">
+        <i class="fas fa-file-export"></i>
+      </button>
+      <button onclick="openTaskModal()" class="btn-nueva-header btn-primary text-white px-4 py-2 rounded-xl text-sm font-semibold flex items-center gap-2 shadow-lg">
+        <i class="fas fa-plus text-xs"></i> <span class="hidden sm:inline">Nueva Tarea</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Filtros -->
+  <div id="filtersBar" class="bg-white/60 backdrop-blur border-b border-surface-200 px-4 md:px-6 py-3 no-print overflow-x-auto">
+    <div class="flex items-center gap-2 min-w-max">
+      <select id="filterDept" onchange="applyFilters()" class="text-sm border border-surface-200 rounded-lg px-3 py-1.5 bg-white focus:ring-2 focus:ring-brand-300">
+        <option value="all">Todos los depts.</option>
+      </select>
+      <select id="filterPerson" onchange="applyFilters()" class="text-sm border border-surface-200 rounded-lg px-3 py-1.5 bg-white focus:ring-2 focus:ring-brand-300">
+        <option value="all">Todos los responsables</option>
+      </select>
+      <select id="filterPriority" onchange="applyFilters()" class="text-sm border border-surface-200 rounded-lg px-3 py-1.5 bg-white focus:ring-2 focus:ring-brand-300">
+        <option value="all">Todas las prioridades</option>
+        <option value="alta">Alta</option>
+        <option value="media">Media</option>
+        <option value="baja">Baja</option>
+      </select>
+      <button onclick="clearFilters()" class="text-xs text-ind-iron hover:text-brand-500 transition underline whitespace-nowrap">Limpiar</button>
+    </div>
+  </div>
+
+  <div id="mainContent" class="flex-1 overflow-hidden p-4 md:p-6"></div>
+</main>
+
+<!-- FAB -->
+<button id="fab" onclick="openTaskModal()" class="btn-primary text-white items-center justify-center no-print">
+  <i class="fas fa-plus text-xl"></i>
+</button>
+
+<!-- Bottom Nav -->
+<nav id="mobileNav" class="no-print">
+  <button onclick="switchView('board')" data-mobile-nav="board" class="flex-1 flex flex-col items-center gap-1 py-1 text-white/50" style="font-size:10px">
+    <i class="fas fa-columns text-lg"></i> Tablero
+  </button>
+  <button onclick="switchView('history')" data-mobile-nav="history" class="flex-1 flex flex-col items-center gap-1 py-1 text-white/50" style="font-size:10px">
+    <i class="fas fa-clock-rotate-left text-lg"></i> Historial
+  </button>
+  <button onclick="openManagementModal()" class="flex-1 flex flex-col items-center gap-1 py-1 text-white/50" style="font-size:10px">
+    <i class="fas fa-users-gear text-lg"></i> Equipos
+  </button>
+</nav>
+
+<!-- MODAL TAREA -->
+<div id="taskModal" class="hidden fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+  <div class="modal-overlay absolute inset-0" onclick="closeTaskModal()"></div>
+  <div class="modal-content relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] overflow-y-auto">
+    <div class="sticky top-0 bg-white rounded-t-2xl border-b border-surface-200 px-5 py-4 flex items-center justify-between z-10">
+      <h2 id="modalTitle" class="font-display font-700 text-lg">Nueva Tarea</h2>
+      <button onclick="closeTaskModal()" class="w-8 h-8 rounded-lg hover:bg-surface-100 flex items-center justify-center text-ind-iron"><i class="fas fa-xmark"></i></button>
+    </div>
+    <div class="p-5 space-y-4">
+      <input type="hidden" id="taskId">
+      <div>
+        <label class="block text-sm font-semibold mb-1.5">Título</label>
+        <input id="taskTitle" type="text" placeholder="Ej: Revisión de línea A3"
+          class="w-full px-4 py-2.5 rounded-xl border border-surface-200 text-sm focus:outline-none focus:ring-2 focus:ring-brand-300">
+      </div>
+      <div>
+        <label class="block text-sm font-semibold mb-1.5">Descripción</label>
+        <textarea id="taskDesc" rows="3" placeholder="Detalles..." class="w-full px-4 py-2.5 rounded-xl border border-surface-200 text-sm focus:outline-none focus:ring-2 focus:ring-brand-300 resize-none"></textarea>
+      </div>
+      <div>
+        <label class="block text-sm font-semibold mb-1.5">Departamentos <span class="text-ind-concrete font-normal">(uno o varios)</span></label>
+        <div class="relative">
+          <div id="deptChips" class="chips-container" onclick="toggleDeptDropdown()"></div>
+          <div id="deptDropdown" class="dropdown-list hidden mt-1"></div>
+        </div>
+      </div>
+      <div>
+        <label class="block text-sm font-semibold mb-1.5">Responsables <span class="text-ind-concrete font-normal">(uno o varios)</span></label>
+        <div class="relative">
+          <div id="personChips" class="chips-container" onclick="togglePersonDropdown()"></div>
+          <div id="personDropdown" class="dropdown-list hidden mt-1"></div>
+        </div>
+      </div>
+      <div class="grid grid-cols-3 gap-3">
+        <div>
+          <label class="block text-sm font-semibold mb-1.5">Prioridad</label>
+          <select id="taskPriority" class="w-full px-3 py-2.5 rounded-xl border border-surface-200 text-sm focus:outline-none focus:ring-2 focus:ring-brand-300">
+            <option value="alta">Alta</option>
+            <option value="media" selected>Media</option>
+            <option value="baja">Baja</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-sm font-semibold mb-1.5">Fecha límite</label>
+          <input id="taskDue" type="date" class="w-full px-3 py-2.5 rounded-xl border border-surface-200 text-sm focus:outline-none focus:ring-2 focus:ring-brand-300">
+        </div>
+        <div>
+          <label class="block text-sm font-semibold mb-1.5">Columna</label>
+          <select id="taskColumn" class="w-full px-3 py-2.5 rounded-xl border border-surface-200 text-sm focus:outline-none focus:ring-2 focus:ring-brand-300">
+            <option value="hoy">Hoy</option>
+            <option value="manana">Mañana</option>
+            <option value="semana">Próx. semana</option>
+          </select>
+        </div>
+      </div>
+      <div>
+        <label class="block text-sm font-semibold mb-1.5">Comentario inicial <span class="text-ind-concrete font-normal">(opcional)</span></label>
+        <textarea id="taskComment" rows="2" placeholder="Agregar un comentario..." class="w-full px-4 py-2.5 rounded-xl border border-surface-200 text-sm focus:outline-none focus:ring-2 focus:ring-brand-300 resize-none"></textarea>
+      </div>
+      <div class="flex gap-3 pt-2">
+        <button onclick="saveTask()" class="btn-primary text-white px-6 py-2.5 rounded-xl text-sm font-semibold flex-1">
+          <i class="fas fa-check mr-2"></i>Guardar
+        </button>
+        <button onclick="closeTaskModal()" class="px-5 py-2.5 rounded-xl text-sm font-medium border border-surface-200 hover:bg-surface-50 transition">
+          Cancelar
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL DETALLE -->
+<div id="detailModal" class="hidden fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+  <div class="modal-overlay absolute inset-0" onclick="closeDetailModal()"></div>
+  <div class="modal-content relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] overflow-y-auto">
+    <div id="detailContent"></div>
+  </div>
+</div>
+
+<!-- MODAL GESTIÓN -->
+<div id="managementModal" class="hidden fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+  <div class="modal-overlay absolute inset-0" onclick="closeManagementModal()"></div>
+  <div class="modal-content relative bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[92vh] overflow-y-auto">
+    <div class="sticky top-0 bg-white rounded-t-2xl border-b border-surface-200 px-5 py-4 flex items-center justify-between z-10">
+      <h2 class="font-display font-700 text-lg">Gestionar Equipos</h2>
+      <button onclick="closeManagementModal()" class="w-8 h-8 rounded-lg hover:bg-surface-100 flex items-center justify-center text-ind-iron"><i class="fas fa-xmark"></i></button>
+    </div>
+    <div class="p-5">
+      <div class="flex gap-2 mb-5">
+        <button class="mgmt-tab active" id="tabPeopleBtn" onclick="switchMgmtTab('people')"><i class="fas fa-users mr-1.5"></i>Personas</button>
+        <button class="mgmt-tab" id="tabDeptsBtn" onclick="switchMgmtTab('depts')"><i class="fas fa-building mr-1.5"></i>Departamentos</button>
+      </div>
+      <div id="panelPeople">
+        <div class="flex gap-2 mb-4">
+          <input id="newPersonName" type="text" placeholder="Nombre completo" class="flex-1 px-3 py-2 rounded-xl border border-surface-200 text-sm focus:outline-none focus:ring-2 focus:ring-brand-300">
+          <select id="newPersonDept" class="px-3 py-2 rounded-xl border border-surface-200 text-sm focus:outline-none focus:ring-2 focus:ring-brand-300"></select>
+          <button onclick="addPerson()" class="btn-primary text-white px-4 py-2 rounded-xl text-sm font-semibold"><i class="fas fa-plus"></i></button>
+        </div>
+        <div id="peopleList" class="max-h-[50vh] overflow-y-auto"></div>
+      </div>
+      <div id="panelDepts" class="hidden">
+        <div class="flex gap-2 mb-4">
+          <input id="newDeptName" type="text" placeholder="Nombre del departamento" class="flex-1 px-3 py-2 rounded-xl border border-surface-200 text-sm focus:outline-none focus:ring-2 focus:ring-brand-300">
+          <input id="newDeptColor" type="color" value="#E07A2F" class="w-10 h-10 rounded-lg border border-surface-200 cursor-pointer p-0.5">
+          <button onclick="addDept()" class="btn-primary text-white px-4 py-2 rounded-xl text-sm font-semibold"><i class="fas fa-plus"></i></button>
+        </div>
+        <div id="deptsList" class="max-h-[50vh] overflow-y-auto"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL EXPORTAR -->
+<div id="exportModal" class="hidden fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+  <div class="modal-overlay absolute inset-0" onclick="closeExportModal()"></div>
+  <div class="modal-content relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+    <h3 class="font-display font-700 text-lg mb-4">Exportar Reporte</h3>
+    <div class="grid grid-cols-2 gap-3">
+      <button onclick="exportCSV()" class="flex flex-col items-center gap-2 p-5 rounded-xl border-2 border-surface-200 hover:border-green-400 hover:bg-green-50 transition active:scale-95">
+        <i class="fas fa-file-excel text-3xl text-green-600"></i><span class="text-sm font-semibold">CSV (Excel)</span>
+      </button>
+      <button onclick="exportPDF()" class="flex flex-col items-center gap-2 p-5 rounded-xl border-2 border-surface-200 hover:border-red-400 hover:bg-red-50 transition active:scale-95">
+        <i class="fas fa-file-pdf text-3xl text-red-500"></i><span class="text-sm font-semibold">PDF (Imprimir)</span>
+      </button>
+    </div>
+    <button onclick="closeExportModal()" class="mt-4 w-full py-2.5 text-sm text-ind-iron hover:text-brand-500 transition">Cancelar</button>
+  </div>
+</div>
+
+<div id="toastContainer" class="fixed top-16 right-4 z-[100] space-y-2 pointer-events-none max-w-xs w-full"></div>
+
+<!-- CONFIG -->
+<script src="config.js"></script>
+
+<script>
+// ─────────────────────────────────────────
+// SUPABASE CLIENT
+// ─────────────────────────────────────────
+let supabase = null;
+
+function initSupabase() {
+  if (!window.SUPABASE_URL || !window.SUPABASE_ANON_KEY ||
+      window.SUPABASE_URL === 'TU_SUPABASE_URL' ||
+      window.SUPABASE_ANON_KEY === 'TU_SUPABASE_ANON_KEY') {
+    document.getElementById('configBanner').classList.add('show');
+    document.getElementById('loadingMsg').textContent = 'Falta configurar Supabase (ver config.js)';
+    document.getElementById('dbStatus').textContent = 'Sin configurar';
+    setTimeout(() => hideLoading(), 1500);
+    return false;
+  }
+  supabase = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
+  return true;
+}
+
+// ─────────────────────────────────────────
+// ESTADO
+// ─────────────────────────────────────────
+let state = {
+  tasks: [], departments: [], people: [], history: [],
+  currentView: 'board',
+  filters: { dept:'all', person:'all', priority:'all', search:'' },
+  sidebarOpen: window.innerWidth >= 768,
+};
+let selectedDepts = [];
+let selectedPeople = [];
+
+// ─────────────────────────────────────────
+// UTILIDADES
+// ─────────────────────────────────────────
+function todayStr() { return new Date().toISOString().split('T')[0]; }
+function tomorrowStr() { const d=new Date(); d.setDate(d.getDate()+1); return d.toISOString().split('T')[0]; }
+function nextWeekStr() { const d=new Date(); d.setDate(d.getDate()+7); return d.toISOString().split('T')[0]; }
+function formatDate(s) { if(!s) return '—'; const d=new Date(s+'T00:00:00'); return d.toLocaleDateString('es-ES',{day:'numeric',month:'short'}); }
+function formatDateTime(s) { if(!s) return '—'; return new Date(s).toLocaleDateString('es-ES',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}); }
+function getDeptColor(n) { const d=state.departments.find(d=>d.name===n); return d?d.color:'#6B7280'; }
+function getInitials(n) { return (n||'').split(' ').map(w=>w[0]).join('').substring(0,2).toUpperCase(); }
+function isOverdue(t) { if(t.completed) return false; return new Date(t.due_date+'T00:00:00')<new Date(new Date().toDateString()); }
+function getTaskColumn(t) { if(t.completed) return null; if(isOverdue(t)) return 'atrasadas'; return t.column_key||'hoy'; }
+
+function getFilteredTasks() {
+  return state.tasks.filter(t => {
+    const depts = t.departments||[];
+    const people = t.responsible||[];
+    if (state.filters.dept!=='all' && !depts.includes(state.filters.dept)) return false;
+    if (state.filters.person!=='all' && !people.includes(state.filters.person)) return false;
+    if (state.filters.priority!=='all' && t.priority!==state.filters.priority) return false;
+    if (state.filters.search) {
+      const s=state.filters.search.toLowerCase();
+      if (!t.title.toLowerCase().includes(s) && !(t.description||'').toLowerCase().includes(s) && !people.join(' ').toLowerCase().includes(s)) return false;
+    }
+    return true;
+  });
+}
+
+// ─────────────────────────────────────────
+// DB — CARGA INICIAL
+// ─────────────────────────────────────────
+async function loadAll() {
+  if (!supabase) return;
+  setLoadingMsg('Cargando departamentos...');
+  const [d, p, t, h] = await Promise.all([
+    supabase.from('departments').select('*').order('name'),
+    supabase.from('people').select('*').order('name'),
+    supabase.from('tasks').select('*, comments(*)').order('created_at', { ascending: false }),
+    supabase.from('history').select('*').order('created_at', { ascending: false }).limit(200),
+  ]);
+  state.departments = d.data || [];
+  state.people = p.data || [];
+  state.tasks = (t.data || []).map(task => ({
+    ...task,
+    comments: task.comments || [],
+    departments: task.departments || [],
+    responsible: task.responsible || [],
+  }));
+  state.history = h.data || [];
+  document.getElementById('dbStatus').textContent = 'Supabase ✓';
+}
+
+// ─────────────────────────────────────────
+// DB — TAREAS
+// ─────────────────────────────────────────
+async function dbCreateTask(data) {
+  const { data: row, error } = await supabase.from('tasks').insert([data]).select().single();
+  if (error) { showToast('Error al guardar: '+error.message,'error'); return null; }
+  return row;
+}
+async function dbUpdateTask(id, data) {
+  const { error } = await supabase.from('tasks').update(data).eq('id', id);
+  if (error) showToast('Error al actualizar: '+error.message,'error');
+  return !error;
+}
+async function dbDeleteTask(id) {
+  const { error } = await supabase.from('tasks').delete().eq('id', id);
+  if (error) { showToast('Error al eliminar: '+error.message,'error'); return false; }
+  return true;
+}
+
+// ─────────────────────────────────────────
+// DB — COMENTARIOS
+// ─────────────────────────────────────────
+async function dbAddComment(task_id, author, text) {
+  const { data, error } = await supabase.from('comments').insert([{ task_id, author, text }]).select().single();
+  if (error) { showToast('Error al comentar','error'); return null; }
+  return data;
+}
+
+// ─────────────────────────────────────────
+// DB — HISTORIAL
+// ─────────────────────────────────────────
+async function dbAddHistory(action, detail) {
+  const { data } = await supabase.from('history').insert([{ action, detail }]).select().single();
+  if (data) state.history.unshift(data);
+}
+
+// ─────────────────────────────────────────
+// DB — PERSONAS / DEPARTAMENTOS
+// ─────────────────────────────────────────
+async function dbCreatePerson(name, dept) {
+  const { data, error } = await supabase.from('people').insert([{ name, dept }]).select().single();
+  if (error) { showToast('Error: '+error.message,'error'); return null; }
+  return data;
+}
+async function dbDeletePerson(id) {
+  const { error } = await supabase.from('people').delete().eq('id', id);
+  return !error;
+}
+async function dbCreateDept(name, color) {
+  const { data, error } = await supabase.from('departments').insert([{ name, color }]).select().single();
+  if (error) { showToast('Error: '+error.message,'error'); return null; }
+  return data;
+}
+async function dbDeleteDept(name) {
+  const { error } = await supabase.from('departments').delete().eq('name', name);
+  return !error;
+}
+async function dbUpdateDeptColor(name, color) {
+  await supabase.from('departments').update({ color }).eq('name', name);
+}
+
+// ─────────────────────────────────────────
+// REALTIME
+// ─────────────────────────────────────────
+function subscribeRealtime() {
+  if (!supabase) return;
+  supabase.channel('ff-changes')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, async () => {
+      await reloadTasks();
+      render();
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'comments' }, async () => {
+      await reloadTasks();
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'departments' }, async () => {
+      const { data } = await supabase.from('departments').select('*').order('name');
+      state.departments = data || [];
+      populateFilterDropdowns(); render();
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'people' }, async () => {
+      const { data } = await supabase.from('people').select('*').order('name');
+      state.people = data || [];
+      populateFilterDropdowns();
+    })
+    .subscribe();
+}
+
+async function reloadTasks() {
+  const { data } = await supabase.from('tasks').select('*, comments(*)').order('created_at', { ascending: false });
+  state.tasks = (data||[]).map(t => ({ ...t, comments: t.comments||[], departments: t.departments||[], responsible: t.responsible||[] }));
+  updateNotifBadge();
+}
+
+// ─────────────────────────────────────────
+// TOASTS / LOADING
+// ─────────────────────────────────────────
+function showToast(msg, type='info') {
+  const colors={info:'bg-brand-500',success:'bg-emerald-500',error:'bg-red-500',warning:'bg-amber-500'};
+  const icons={info:'fa-circle-info',success:'fa-circle-check',error:'fa-circle-exclamation',warning:'fa-triangle-exclamation'};
+  const el=document.createElement('div');
+  el.className=`toast pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-xl text-white text-sm shadow-xl ${colors[type]||colors.info}`;
+  el.innerHTML=`<i class="fas ${icons[type]||icons.info}"></i><span class="flex-1">${msg}</span><button onclick="this.parentElement.remove()" class="hover:opacity-70 ml-2"><i class="fas fa-xmark text-xs"></i></button>`;
+  document.getElementById('toastContainer').appendChild(el);
+  setTimeout(()=>{ if(el.parentElement) el.remove(); },4000);
+}
+function setLoadingMsg(msg) { document.getElementById('loadingMsg').textContent=msg; }
+function hideLoading() {
+  const overlay=document.getElementById('loadingOverlay');
+  overlay.classList.add('fade-out');
+  setTimeout(()=>overlay.remove(),400);
+}
+
+// ─────────────────────────────────────────
+// SIDEBAR
+// ─────────────────────────────────────────
+function toggleSidebar() {
+  const mob=window.innerWidth<768;
+  if(mob){ state.sidebarOpen=!state.sidebarOpen; document.getElementById('sidebar').classList.toggle('open',state.sidebarOpen); document.getElementById('sidebarOverlay').classList.toggle('show',state.sidebarOpen); }
+  else { state.sidebarOpen=!state.sidebarOpen; document.getElementById('sidebar').classList.toggle('collapsed',!state.sidebarOpen); }
+}
+function closeSidebarMobile() { state.sidebarOpen=false; document.getElementById('sidebar').classList.remove('open'); document.getElementById('sidebarOverlay').classList.remove('show'); }
+
+function renderSidebarDepts() {
+  document.getElementById('sidebar-depts').innerHTML = `
+    <button onclick="filterByDept('all')" class="nav-item w-full flex items-center gap-3 px-4 py-2 text-sm ${state.filters.dept==='all'?'active':''}">
+      <span class="w-2.5 h-2.5 rounded-full bg-white/30 flex-shrink-0"></span> Todos
+    </button>
+    ${state.departments.map(d=>`
+      <button onclick="filterByDept('${d.name}')" class="nav-item w-full flex items-center gap-3 px-4 py-2 text-sm ${state.filters.dept===d.name?'active':''}">
+        <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background:${d.color}"></span>
+        <span class="truncate">${d.name}</span>
+        <span class="ml-auto text-[10px] text-white/30">${state.tasks.filter(t=>(t.departments||[]).includes(d.name)&&!t.completed).length}</span>
+      </button>`).join('')}`;
+}
+function filterByDept(dept) { state.filters.dept=dept; document.getElementById('filterDept').value=dept; applyFilters(); switchView('board'); if(window.innerWidth<768) closeSidebarMobile(); }
+
+// ─────────────────────────────────────────
+// NAVEGACIÓN / FILTROS
+// ─────────────────────────────────────────
+function switchView(view) {
+  state.currentView=view;
+  document.querySelectorAll('[data-nav]').forEach(b=>b.classList.toggle('active',b.dataset.nav===view));
+  document.querySelectorAll('[data-mobile-nav]').forEach(b=>{ b.classList.toggle('text-brand-400',b.dataset.mobileNav===view); b.classList.toggle('text-white/50',b.dataset.mobileNav!==view); });
+  document.getElementById('filtersBar').classList.toggle('hidden',view!=='board');
+  render();
+}
+function populateFilterDropdowns() {
+  document.getElementById('filterDept').innerHTML = '<option value="all">Todos los depts.</option>'+state.departments.map(d=>`<option value="${d.name}">${d.name}</option>`).join('');
+  document.getElementById('filterPerson').innerHTML = '<option value="all">Todos los responsables</option>'+state.people.map(p=>`<option value="${p.name}">${p.name}</option>`).join('');
+  document.getElementById('filterDept').value=state.filters.dept;
+  document.getElementById('filterPerson').value=state.filters.person;
+}
+function applyFilters() { state.filters.dept=document.getElementById('filterDept').value; state.filters.person=document.getElementById('filterPerson').value; state.filters.priority=document.getElementById('filterPriority').value; render(); }
+function clearFilters() { state.filters={dept:'all',person:'all',priority:'all',search:''}; document.getElementById('searchInput').value=''; populateFilterDropdowns(); document.getElementById('filterPriority').value='all'; render(); }
+function handleSearch(v) { state.filters.search=v; render(); }
+
+// ─────────────────────────────────────────
+// RENDER
+// ─────────────────────────────────────────
+function render() {
+  renderSidebarDepts();
+  updateNotifBadge();
+  const c=document.getElementById('mainContent');
+  if(state.currentView==='board'){ c.innerHTML=renderBoard(); initDragDrop(); initTouchDrag(); }
+  else if(state.currentView==='history'){ c.innerHTML=renderHistory(); }
+}
+
+// ─────────────────────────────────────────
+// KANBAN
+// ─────────────────────────────────────────
+function renderBoard() {
+  const filtered=getFilteredTasks();
+  const cols=[
+    {key:'atrasadas',label:'Atrasadas',icon:'fa-triangle-exclamation',color:'#DC2626',bg:'bg-red-50'},
+    {key:'hoy',label:'Hoy',icon:'fa-calendar-day',color:'#E07A2F',bg:'bg-brand-50'},
+    {key:'manana',label:'Mañana',icon:'fa-calendar-plus',color:'#0D9488',bg:'bg-teal-50'},
+    {key:'semana',label:'Próxima Semana',icon:'fa-calendar-week',color:'#6366F1',bg:'bg-indigo-50'},
+  ];
+  return `<div class="max-w-[1600px] mx-auto h-full flex flex-col">
+    <div class="mb-3 flex items-center justify-between flex-shrink-0">
+      <div><h2 class="font-display font-800 text-xl md:text-2xl">Tablero de Tareas</h2><p class="text-ind-iron text-sm mt-0.5">${filtered.filter(t=>!t.completed).length} tareas activas</p></div>
+    </div>
+    <p class="col-scroll-hint mb-2"><i class="fas fa-hand-point-right mr-1"></i>Desliza para ver todas las columnas</p>
+    <div class="board-scroll-container flex-1"><div class="board-inner gap-4">
+      ${cols.map(col=>{
+        const tasks=filtered.filter(t=>!t.completed&&getTaskColumn(t)===col.key);
+        return `<div class="board-column-wrapper flex flex-col">
+          <div class="flex items-center gap-2 mb-3 px-1">
+            <div class="w-8 h-8 rounded-lg ${col.bg} flex items-center justify-center flex-shrink-0"><i class="fas ${col.icon} text-sm" style="color:${col.color}"></i></div>
+            <h3 class="font-display font-700 text-sm" style="color:${col.color}">${col.label}</h3>
+            <span class="ml-auto text-xs font-bold px-2 py-0.5 rounded-full" style="background:${col.color}15;color:${col.color}">${tasks.length}</span>
+          </div>
+          <div class="kanban-col flex-1 rounded-2xl bg-surface-50/70 border border-surface-200 p-3 space-y-3 min-h-[280px]" data-column="${col.key}" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event)">
+            ${tasks.length===0?`<div class="flex flex-col items-center justify-center py-10 text-ind-concrete"><i class="fas fa-inbox text-2xl mb-2 opacity-25"></i><p class="text-xs">Sin tareas</p></div>`
+            :tasks.map(t=>renderTaskCard(t,col.color)).join('')}
+          </div>
+        </div>`;
+      }).join('')}
+    </div></div>
+    ${filtered.filter(t=>t.completed).length>0?`
+    <div class="mt-6 flex-shrink-0">
+      <div class="flex items-center gap-2 mb-3 px-1">
+        <div class="w-8 h-8 rounded-lg bg-emerald-50 flex items-center justify-center"><i class="fas fa-circle-check text-sm text-emerald-500"></i></div>
+        <h3 class="font-display font-700 text-sm text-emerald-600">Completadas</h3>
+        <span class="ml-auto text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-600">${filtered.filter(t=>t.completed).length}</span>
+      </div>
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        ${filtered.filter(t=>t.completed).slice(0,8).map(t=>`
+          <div class="bg-emerald-50/50 border border-emerald-100 rounded-xl p-3 opacity-70 cursor-pointer hover:opacity-100 transition" onclick="openDetailModal('${t.id}')">
+            <p class="text-sm font-medium line-through text-ind-iron">${t.title}</p>
+            <p class="text-[11px] text-ind-concrete mt-1">${(t.responsible||[]).join(', ')}</p>
+          </div>`).join('')}
+      </div>
+    </div>`:''}
+  </div>`;
+}
+
+function renderTaskCard(task, colColor) {
+  const people=task.responsible||[];
+  const depts=task.departments||[];
+  const overdue=isOverdue(task);
+  const dc=getDeptColor(depts[0]);
+  return `<div class="task-card prio-${task.priority} bg-white rounded-xl p-4 shadow-sm border border-surface-200 ${overdue?'pulse-atrasada':''}"
+      draggable="true" data-task-id="${task.id}" ondragstart="handleDragStart(event)" ondragend="handleDragEnd(event)">
+    <div class="flex items-start gap-2 mb-2">
+      <i class="drag-handle fas fa-grip-vertical text-xs mt-1" data-task-id="${task.id}"></i>
+      <h4 class="text-sm font-semibold leading-snug flex-1 cursor-pointer" onclick="openDetailModal('${task.id}')">${task.title}</h4>
+      <span class="w-2 h-2 rounded-full flex-shrink-0 mt-1.5" style="background:${task.priority==='alta'?'#DC2626':task.priority==='media'?'#F59E0B':'#10B981'}"></span>
+    </div>
+    ${task.description?`<p class="text-xs text-ind-iron line-clamp-2 mb-3 cursor-pointer" onclick="openDetailModal('${task.id}')">${task.description}</p>`:''}
+    <div class="flex items-center gap-1.5 flex-wrap mb-3">
+      ${depts.map(d=>`<span class="dept-badge" style="background:${getDeptColor(d)}15;color:${getDeptColor(d)}">${d}</span>`).join('')}
+      ${overdue?'<span class="dept-badge bg-red-100 text-red-600">VENCIDA</span>':''}
+    </div>
+    <div class="flex items-center justify-between" onclick="openDetailModal('${task.id}')">
+      <div class="flex items-center gap-1.5">
+        ${people.slice(0,3).map((n,i)=>`<div class="avatar" style="background:${getDeptColor(depts[0]||'')};width:24px;height:24px;font-size:9px;margin-left:${i>0?'-8px':'0'};border:2px solid #fff" title="${n}">${getInitials(n)}</div>`).join('')}
+        ${people.length>3?`<span class="text-[10px] text-ind-concrete ml-1">+${people.length-3}</span>`:''}
+        <span class="text-[11px] text-ind-iron ml-1">${people.length===1?people[0].split(' ')[0]:people.length+' pers.'}</span>
+      </div>
+      <div class="flex items-center gap-2 text-[11px] text-ind-concrete">
+        ${(task.comments||[]).length>0?`<span><i class="fas fa-comment text-[9px]"></i> ${task.comments.length}</span>`:''}
+        <span class="${overdue?'text-red-500 font-semibold':''}"><i class="fas fa-calendar text-[9px]"></i> ${formatDate(task.due_date)}</span>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ─────────────────────────────────────────
+// DRAG & DROP
+// ─────────────────────────────────────────
+let draggedTaskId=null;
+function handleDragStart(e){ draggedTaskId=e.currentTarget.dataset.taskId; e.currentTarget.classList.add('dragging'); e.dataTransfer.effectAllowed='move'; e.dataTransfer.setData('text/plain',draggedTaskId); }
+function handleDragEnd(e){ e.currentTarget.classList.remove('dragging'); document.querySelectorAll('.kanban-col').forEach(c=>c.classList.remove('drag-over')); draggedTaskId=null; }
+function handleDragOver(e){ e.preventDefault(); e.currentTarget.classList.add('drag-over'); }
+function handleDragLeave(e){ if(!e.currentTarget.contains(e.relatedTarget)) e.currentTarget.classList.remove('drag-over'); }
+function handleDrop(e){ e.preventDefault(); e.currentTarget.classList.remove('drag-over'); moveTaskToColumn(e.dataTransfer.getData('text/plain')||draggedTaskId, e.currentTarget.dataset.column); }
+function initDragDrop(){}
+
+function initTouchDrag() {
+  let touchCard=null,ghost=null,touchColKey=null;
+  document.querySelectorAll('.drag-handle').forEach(h=>{
+    h.addEventListener('touchstart',e=>{
+      const taskId=h.dataset.taskId; touchCard=document.querySelector(`[data-task-id="${taskId}"]`); if(!touchCard) return;
+      ghost=touchCard.cloneNode(true); ghost.style.cssText=`position:fixed;pointer-events:none;opacity:.75;z-index:999;width:${touchCard.offsetWidth}px;transform:rotate(2deg);`; document.body.appendChild(ghost); touchCard.style.opacity='.3';
+      const mv=ev=>{ev.preventDefault();const t=ev.touches[0];ghost.style.left=(t.clientX-ghost.offsetWidth/2)+'px';ghost.style.top=(t.clientY-40)+'px';document.querySelectorAll('.kanban-col').forEach(c=>c.classList.remove('drag-over'));const el=document.elementFromPoint(t.clientX,t.clientY);const col=el&&el.closest('.kanban-col');if(col){col.classList.add('drag-over');touchColKey=col.dataset.column;}else touchColKey=null;};
+      const end=()=>{if(ghost)ghost.remove();if(touchCard)touchCard.style.opacity='';document.querySelectorAll('.kanban-col').forEach(c=>c.classList.remove('drag-over'));if(touchColKey&&taskId)moveTaskToColumn(taskId,touchColKey);document.removeEventListener('touchmove',mv);document.removeEventListener('touchend',end);};
+      document.addEventListener('touchmove',mv,{passive:false}); document.addEventListener('touchend',end);
+    },{passive:true});
+  });
+}
+
+async function moveTaskToColumn(taskId, newColumn) {
+  if(!taskId||!newColumn) return;
+  const task=state.tasks.find(t=>t.id===taskId); if(!task) return;
+  if(getTaskColumn(task)===newColumn) return;
+  const dateMap={hoy:todayStr(),manana:tomorrowStr(),semana:nextWeekStr()};
+  const due=dateMap[newColumn]||task.due_date;
+  const colNames={hoy:'Hoy',manana:'Mañana',semana:'Próxima Semana',atrasadas:'Atrasadas'};
+  // Optimistic update
+  task.column_key=newColumn; task.due_date=due;
+  render();
+  await dbUpdateTask(taskId,{column_key:newColumn,due_date:due});
+  await dbAddHistory('movida',`"${task.title}" → ${colNames[newColumn]}`);
+  showToast(`Movida a ${colNames[newColumn]}`,'success');
+}
+
+// ─────────────────────────────────────────
+// MULTI-SELECT CHIPS
+// ─────────────────────────────────────────
+function renderDeptChips() {
+  document.getElementById('deptChips').innerHTML = selectedDepts.map(d=>`<span class="chip chip-dept">${d}<button onclick="removeDept('${d}');event.stopPropagation()">×</button></span>`).join('')
+    + (selectedDepts.length===0?'<span class="text-sm text-ind-concrete">Seleccionar departamentos...</span>':'');
+}
+function renderPersonChips() {
+  document.getElementById('personChips').innerHTML = selectedPeople.map(p=>`<span class="chip">${p}<button onclick="removePerson('${p}');event.stopPropagation()">×</button></span>`).join('')
+    + (selectedPeople.length===0?'<span class="text-sm text-ind-concrete">Seleccionar responsables...</span>':'');
+}
+function removeDept(n){ selectedDepts=selectedDepts.filter(d=>d!==n); renderDeptChips(); renderDeptDropdown(); renderPersonDropdown(); }
+function removePerson(n){ selectedPeople=selectedPeople.filter(p=>p!==n); renderPersonChips(); renderPersonDropdown(); }
+
+function toggleDeptDropdown(){ const dd=document.getElementById('deptDropdown'); dd.classList.toggle('hidden'); if(!dd.classList.contains('hidden')) renderDeptDropdown(); }
+function togglePersonDropdown(){ const dd=document.getElementById('personDropdown'); dd.classList.toggle('hidden'); if(!dd.classList.contains('hidden')) renderPersonDropdown(); }
+
+function renderDeptDropdown() {
+  document.getElementById('deptDropdown').innerHTML = state.departments.map(d=>`
+    <div class="dropdown-item ${selectedDepts.includes(d.name)?'selected':''}" onclick="toggleDeptSel('${d.name}')">
+      <span class="w-3 h-3 rounded-full flex-shrink-0" style="background:${d.color}"></span>${d.name}
+      ${selectedDepts.includes(d.name)?'<i class="fas fa-check ml-auto text-xs"></i>':''}
+    </div>`).join('');
+}
+function renderPersonDropdown() {
+  let people = state.people;
+  if (selectedDepts.length>0) people=state.people.filter(p=>selectedDepts.includes(p.dept)||selectedPeople.includes(p.name));
+  document.getElementById('personDropdown').innerHTML = people.map(p=>`
+    <div class="dropdown-item ${selectedPeople.includes(p.name)?'selected':''}" onclick="togglePersonSel('${p.name}')">
+      <div class="avatar" style="background:${getDeptColor(p.dept)};width:22px;height:22px;font-size:9px">${getInitials(p.name)}</div>
+      <span class="flex-1">${p.name}</span><span class="text-[10px] text-ind-concrete">${p.dept}</span>
+      ${selectedPeople.includes(p.name)?'<i class="fas fa-check text-xs text-brand-500"></i>':''}
+    </div>`).join('') || '<div class="dropdown-item text-ind-concrete">Sin personas en estos departamentos</div>';
+}
+function toggleDeptSel(n){ if(selectedDepts.includes(n)) selectedDepts=selectedDepts.filter(d=>d!==n); else selectedDepts.push(n); renderDeptChips(); renderDeptDropdown(); renderPersonDropdown(); }
+function togglePersonSel(n){ if(selectedPeople.includes(n)) selectedPeople=selectedPeople.filter(p=>p!==n); else selectedPeople.push(n); renderPersonChips(); renderPersonDropdown(); }
+
+document.addEventListener('click',e=>{
+  if(!e.target.closest('#deptChips')&&!e.target.closest('#deptDropdown')) document.getElementById('deptDropdown')?.classList.add('hidden');
+  if(!e.target.closest('#personChips')&&!e.target.closest('#personDropdown')) document.getElementById('personDropdown')?.classList.add('hidden');
+});
+
+// ─────────────────────────────────────────
+// MODAL TAREA
+// ─────────────────────────────────────────
+function openTaskModal(taskId) {
+  selectedDepts=[]; selectedPeople=[];
+  if(taskId){
+    const t=state.tasks.find(t=>t.id===taskId); if(!t) return;
+    document.getElementById('modalTitle').textContent='Editar Tarea';
+    document.getElementById('taskId').value=t.id;
+    document.getElementById('taskTitle').value=t.title;
+    document.getElementById('taskDesc').value=t.description||'';
+    document.getElementById('taskPriority').value=t.priority;
+    document.getElementById('taskDue').value=t.due_date;
+    document.getElementById('taskColumn').value=t.column_key||'hoy';
+    document.getElementById('taskComment').value='';
+    selectedDepts=[...(t.departments||[])];
+    selectedPeople=[...(t.responsible||[])];
+  } else {
+    document.getElementById('modalTitle').textContent='Nueva Tarea';
+    document.getElementById('taskId').value='';
+    document.getElementById('taskTitle').value='';
+    document.getElementById('taskDesc').value='';
+    document.getElementById('taskPriority').value='media';
+    document.getElementById('taskDue').value=todayStr();
+    document.getElementById('taskColumn').value='hoy';
+    document.getElementById('taskComment').value='';
+  }
+  renderDeptChips(); renderPersonChips();
+  document.getElementById('taskModal').classList.remove('hidden');
+  setTimeout(()=>document.getElementById('taskTitle').focus(),100);
+}
+function closeTaskModal(){ document.getElementById('taskModal').classList.add('hidden'); }
+
+async function saveTask() {
+  const id=document.getElementById('taskId').value;
+  const title=document.getElementById('taskTitle').value.trim();
+  const desc=document.getElementById('taskDesc').value.trim();
+  const priority=document.getElementById('taskPriority').value;
+  const due_date=document.getElementById('taskDue').value;
+  const column_key=document.getElementById('taskColumn').value;
+  const comment=document.getElementById('taskComment').value.trim();
+
+  if(!title){ showToast('El título es obligatorio','warning'); return; }
+  if(!due_date){ showToast('La fecha es obligatoria','warning'); return; }
+  if(selectedDepts.length===0){ showToast('Selecciona al menos un departamento','warning'); return; }
+  if(selectedPeople.length===0){ showToast('Selecciona al menos un responsable','warning'); return; }
+
+  if(id){
+    const ok=await dbUpdateTask(id,{ title, description:desc, departments:selectedDepts, responsible:selectedPeople, priority, due_date, column_key });
+    if(ok){
+      if(comment){ await dbAddComment(id,'Administrador',comment); }
+      await dbAddHistory('editada',`"${title}" modificada`);
+      await reloadTasks(); render();
+      showToast('Tarea actualizada','success');
+    }
+  } else {
+    const row=await dbCreateTask({ title, description:desc, departments:selectedDepts, responsible:selectedPeople, priority, due_date, column_key, completed:false });
+    if(row){
+      if(comment) await dbAddComment(row.id,'Administrador',comment);
+      await dbAddHistory('creada',`"${title}" creada para ${selectedPeople.join(', ')}`);
+      await reloadTasks(); render();
+      showToast('Tarea creada','success');
+    }
+  }
+  closeTaskModal();
+}
+
+// ─────────────────────────────────────────
+// MODAL DETALLE
+// ─────────────────────────────────────────
+function openDetailModal(taskId) {
+  const task=state.tasks.find(t=>t.id===taskId); if(!task) return;
+  const depts=task.departments||[]; const people=task.responsible||[];
+  const overdue=isOverdue(task); const column=getTaskColumn(task)||task.column_key;
+  const colNames={hoy:'Hoy',manana:'Mañana',semana:'Próxima Semana',atrasadas:'Atrasadas'};
+
+  document.getElementById('detailContent').innerHTML=`
+    <div class="sticky top-0 bg-white rounded-t-2xl border-b border-surface-200 px-5 py-4 flex items-center justify-between z-10">
+      <div class="flex items-center gap-3 min-w-0">
+        <div class="w-3 h-3 rounded-full flex-shrink-0" style="background:${task.priority==='alta'?'#DC2626':task.priority==='media'?'#F59E0B':'#10B981'}"></div>
+        <h2 class="font-display font-700 text-base truncate ${task.completed?'line-through text-ind-iron':''}">${task.title}</h2>
+      </div>
+      <button onclick="closeDetailModal()" class="w-8 h-8 rounded-lg hover:bg-surface-100 flex items-center justify-center text-ind-iron ml-2"><i class="fas fa-xmark"></i></button>
+    </div>
+    <div class="p-5 space-y-4">
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <p class="text-[10px] uppercase tracking-wider text-ind-concrete font-semibold mb-1.5">Departamentos</p>
+          <div class="flex flex-wrap gap-1">${depts.map(d=>`<span class="dept-badge" style="background:${getDeptColor(d)}15;color:${getDeptColor(d)}">${d}</span>`).join('')}</div>
+        </div>
+        <div>
+          <p class="text-[10px] uppercase tracking-wider text-ind-concrete font-semibold mb-1.5">Responsables</p>
+          <div class="space-y-1">${people.map(n=>{const p=state.people.find(p=>p.name===n); return `<div class="flex items-center gap-2"><div class="avatar" style="background:${getDeptColor(p?.dept||depts[0]||'')};width:22px;height:22px;font-size:9px">${getInitials(n)}</div><span class="text-sm">${n}</span></div>`;}).join('')}</div>
+        </div>
+        <div>
+          <p class="text-[10px] uppercase tracking-wider text-ind-concrete font-semibold mb-1">Fecha límite</p>
+          <p class="text-sm ${overdue?'text-red-500 font-semibold':''}">${formatDate(task.due_date)} ${overdue?'<i class="fas fa-triangle-exclamation text-xs"></i>':''}</p>
+        </div>
+        <div>
+          <p class="text-[10px] uppercase tracking-wider text-ind-concrete font-semibold mb-1">Estado</p>
+          <p class="text-sm">${task.completed?'<span class="text-emerald-600 font-semibold">Completada</span>':colNames[column]||'Activa'}</p>
+        </div>
+      </div>
+      ${task.description?`<div><p class="text-[10px] uppercase tracking-wider text-ind-concrete font-semibold mb-2">Descripción</p><p class="text-sm text-ind-steel leading-relaxed bg-surface-50 rounded-xl p-4">${task.description}</p></div>`:''}
+      <div>
+        <p class="text-[10px] uppercase tracking-wider text-ind-concrete font-semibold mb-2">Comentarios (${(task.comments||[]).length})</p>
+        ${(task.comments||[]).length>0?`<div class="space-y-2 mb-3 max-h-40 overflow-y-auto">${task.comments.map(c=>`<div class="bg-surface-50 rounded-xl px-4 py-3"><div class="flex items-center gap-2 mb-1"><span class="text-xs font-semibold">${c.author}</span><span class="text-[10px] text-ind-concrete">${formatDateTime(c.created_at)}</span></div><p class="text-sm">${c.text}</p></div>`).join('')}</div>`:`<p class="text-sm text-ind-concrete mb-3">Sin comentarios</p>`}
+        <div class="flex gap-2">
+          <input id="newComment" type="text" placeholder="Agregar comentario..." class="flex-1 px-3 py-2 rounded-lg border border-surface-200 text-sm focus:outline-none focus:ring-2 focus:ring-brand-300">
+          <button onclick="addComment('${task.id}')" class="px-4 py-2 bg-brand-500 text-white rounded-lg text-sm font-semibold">Enviar</button>
+        </div>
+      </div>
+      <div class="flex flex-wrap gap-2 pt-3 border-t border-surface-200">
+        ${!task.completed?`<button onclick="completeTask('${task.id}')" class="flex items-center gap-2 px-4 py-2.5 bg-emerald-500 text-white rounded-xl text-sm font-semibold active:scale-95 transition"><i class="fas fa-check"></i> Completar</button>`
+        :`<button onclick="reopenTask('${task.id}')" class="flex items-center gap-2 px-4 py-2.5 bg-brand-500 text-white rounded-xl text-sm font-semibold active:scale-95 transition"><i class="fas fa-rotate-left"></i> Reabrir</button>`}
+        <button onclick="openTaskModal('${task.id}');closeDetailModal()" class="flex items-center gap-2 px-4 py-2.5 bg-surface-100 rounded-xl text-sm font-medium active:scale-95 transition"><i class="fas fa-pen"></i> Editar</button>
+        <button onclick="deleteTask('${task.id}')" class="flex items-center gap-2 px-4 py-2.5 bg-red-50 text-red-600 rounded-xl text-sm font-medium active:scale-95 transition"><i class="fas fa-trash"></i> Eliminar</button>
+      </div>
+    </div>`;
+  document.getElementById('detailModal').classList.remove('hidden');
+}
+function closeDetailModal(){ document.getElementById('detailModal').classList.add('hidden'); }
+
+async function addComment(taskId) {
+  const input=document.getElementById('newComment'); const text=input.value.trim(); if(!text) return;
+  const task=state.tasks.find(t=>t.id===taskId); if(!task) return;
+  const row=await dbAddComment(taskId,'Administrador',text);
+  if(row){ if(!task.comments) task.comments=[]; task.comments.push(row); await dbAddHistory('comentario',`Comentario en "${task.title}"`); openDetailModal(taskId); showToast('Comentario añadido','success'); }
+}
+async function completeTask(taskId) {
+  const task=state.tasks.find(t=>t.id===taskId); if(!task) return;
+  await dbUpdateTask(taskId,{completed:true,completed_at:new Date().toISOString()});
+  await dbAddHistory('completada',`"${task.title}" completada`);
+  await reloadTasks(); render(); closeDetailModal(); showToast('Tarea completada','success');
+}
+async function reopenTask(taskId) {
+  const task=state.tasks.find(t=>t.id===taskId); if(!task) return;
+  await dbUpdateTask(taskId,{completed:false,completed_at:null});
+  await dbAddHistory('reabierta',`"${task.title}" reabierta`);
+  await reloadTasks(); render(); closeDetailModal(); showToast('Tarea reabierta','info');
+}
+async function deleteTask(taskId) {
+  const task=state.tasks.find(t=>t.id===taskId); if(!task) return;
+  if(!confirm(`¿Eliminar "${task.title}"?`)) return;
+  const ok=await dbDeleteTask(taskId);
+  if(ok){ await dbAddHistory('eliminada',`"${task.title}" eliminada`); await reloadTasks(); render(); closeDetailModal(); showToast('Tarea eliminada','warning'); }
+}
+
+// ─────────────────────────────────────────
+// MODAL GESTIÓN
+// ─────────────────────────────────────────
+function openManagementModal(){ switchMgmtTab('people'); document.getElementById('managementModal').classList.remove('hidden'); }
+function closeManagementModal(){ document.getElementById('managementModal').classList.add('hidden'); }
+function switchMgmtTab(tab){
+  document.getElementById('tabPeopleBtn').classList.toggle('active',tab==='people');
+  document.getElementById('tabDeptsBtn').classList.toggle('active',tab==='depts');
+  document.getElementById('panelPeople').classList.toggle('hidden',tab!=='people');
+  document.getElementById('panelDepts').classList.toggle('hidden',tab!=='depts');
+  if(tab==='people') renderPeopleList();
+  if(tab==='depts') renderDeptsList();
+}
+function renderPeopleList(){
+  const sel=document.getElementById('newPersonDept');
+  sel.innerHTML=state.departments.map(d=>`<option value="${d.name}">${d.name}</option>`).join('');
+  document.getElementById('peopleList').innerHTML=state.people.map(p=>`
+    <div class="person-row">
+      <div class="avatar flex-shrink-0" style="background:${getDeptColor(p.dept)};width:36px;height:36px;font-size:12px">${getInitials(p.name)}</div>
+      <div class="flex-1 min-w-0"><p class="text-sm font-semibold truncate">${p.name}</p><p class="text-xs text-ind-concrete">${p.dept}</p></div>
+      <button onclick="deletePerson('${p.id}','${p.name}')" class="w-8 h-8 rounded-lg hover:bg-red-50 text-ind-concrete hover:text-red-500 flex items-center justify-center transition"><i class="fas fa-trash text-xs"></i></button>
+    </div>`).join('') || '<p class="text-sm text-ind-concrete text-center py-6">Sin personas</p>';
+}
+function renderDeptsList(){
+  document.getElementById('deptsList').innerHTML=state.departments.map(d=>`
+    <div class="dept-row">
+      <div class="w-8 h-8 rounded-lg flex-shrink-0 flex items-center justify-center" style="background:${d.color}20"><span class="w-3 h-3 rounded-full" style="background:${d.color}"></span></div>
+      <div class="flex-1 min-w-0"><p class="text-sm font-semibold">${d.name}</p><p class="text-xs text-ind-concrete">${state.people.filter(p=>p.dept===d.name).length} personas</p></div>
+      <input type="color" value="${d.color}" onchange="updateDeptColor('${d.name}',this.value)" class="w-8 h-8 rounded cursor-pointer border border-surface-200 p-0.5">
+      <button onclick="deleteDept('${d.name}')" class="w-8 h-8 rounded-lg hover:bg-red-50 text-ind-concrete hover:text-red-500 flex items-center justify-center transition"><i class="fas fa-trash text-xs"></i></button>
+    </div>`).join('');
+}
+async function addPerson(){
+  const name=document.getElementById('newPersonName').value.trim();
+  const dept=document.getElementById('newPersonDept').value;
+  if(!name){ showToast('Escribe el nombre','warning'); return; }
+  const row=await dbCreatePerson(name,dept);
+  if(row){ state.people.push(row); document.getElementById('newPersonName').value=''; renderPeopleList(); populateFilterDropdowns(); showToast(`${name} añadido/a`,'success'); await dbAddHistory('sistema',`Persona "${name}" añadida`); }
+}
+async function deletePerson(id,name){
+  if(!confirm(`¿Eliminar a "${name}"?`)) return;
+  const ok=await dbDeletePerson(id);
+  if(ok){ state.people=state.people.filter(p=>p.id!==id); renderPeopleList(); populateFilterDropdowns(); showToast(`${name} eliminado/a`,'warning'); }
+}
+async function addDept(){
+  const name=document.getElementById('newDeptName').value.trim();
+  const color=document.getElementById('newDeptColor').value;
+  if(!name){ showToast('Escribe el nombre','warning'); return; }
+  const row=await dbCreateDept(name,color);
+  if(row){ state.departments.push(row); document.getElementById('newDeptName').value=''; renderDeptsList(); populateFilterDropdowns(); renderSidebarDepts(); showToast(`Departamento "${name}" creado`,'success'); await dbAddHistory('sistema',`Departamento "${name}" creado`); }
+}
+async function deleteDept(name){
+  if(!confirm(`¿Eliminar "${name}"?`)) return;
+  const ok=await dbDeleteDept(name);
+  if(ok){ state.departments=state.departments.filter(d=>d.name!==name); renderDeptsList(); populateFilterDropdowns(); render(); showToast(`Departamento "${name}" eliminado`,'warning'); }
+}
+async function updateDeptColor(name,color){
+  await dbUpdateDeptColor(name,color);
+  const d=state.departments.find(d=>d.name===name); if(d) d.color=color;
+  render();
+}
+
+// ─────────────────────────────────────────
+// NOTIFICACIONES
+// ─────────────────────────────────────────
+function checkOverdueAndNotify(){
+  const n=state.tasks.filter(t=>isOverdue(t)).length;
+  updateNotifBadge();
+  showToast(n>0?`Tienes ${n} tarea(s) atrasada(s)`:'No hay tareas atrasadas', n>0?'error':'success');
+}
+function updateNotifBadge(){
+  const n=state.tasks.filter(t=>isOverdue(t)).length;
+  const b=document.getElementById('notifBadge');
+  if(n>0){b.classList.remove('hidden');b.classList.add('flex');b.textContent=n;}
+  else{b.classList.add('hidden');b.classList.remove('flex');}
+}
+
+// ─────────────────────────────────────────
+// AUTO CHECK VENCIDAS
+// ─────────────────────────────────────────
+async function autoCheckOverdue(){
+  const toUpdate=state.tasks.filter(t=>!t.completed&&isOverdue(t)&&t.column_key!=='atrasadas');
+  for(const task of toUpdate){
+    await dbUpdateTask(task.id,{column_key:'atrasadas'});
+    task.column_key='atrasadas';
+    await dbAddHistory('vencida',`"${task.title}" movida a Atrasadas`);
+  }
+  if(toUpdate.length>0) render();
+}
+
+// ─────────────────────────────────────────
+// HISTORIAL
+// ─────────────────────────────────────────
+function renderHistory(){
+  const iconMap={creada:'fa-plus text-emerald-500',completada:'fa-check text-emerald-500',movida:'fa-arrows-alt text-brand-500',editada:'fa-pen text-indigo-500',eliminada:'fa-trash text-red-500',comentario:'fa-comment text-cyan-500',reabierta:'fa-rotate-left text-amber-500',sistema:'fa-gear text-ind-iron',vencida:'fa-triangle-exclamation text-red-500'};
+  return `<div class="max-w-4xl mx-auto">
+    <div class="mb-6"><h2 class="font-display font-800 text-2xl">Historial</h2><p class="text-ind-iron text-sm mt-1">Registro de actividades</p></div>
+    ${state.history.length===0?`<div class="text-center py-16 text-ind-concrete"><i class="fas fa-clock-rotate-left text-4xl mb-3 opacity-20"></i><p>Sin actividad</p></div>`:`
+    <div class="bg-white rounded-2xl border border-surface-200 shadow-sm overflow-hidden">
+      <div class="divide-y divide-surface-100">
+        ${state.history.map(h=>`<div class="flex items-start gap-4 px-5 py-3.5 hover:bg-surface-50 transition">
+          <div class="w-8 h-8 rounded-full bg-surface-100 flex items-center justify-center flex-shrink-0 mt-0.5"><i class="fas ${iconMap[h.action]||'fa-circle text-ind-concrete'} text-xs"></i></div>
+          <div class="flex-1 min-w-0"><p class="text-sm">${h.detail}</p><p class="text-[11px] text-ind-concrete mt-0.5">${formatDateTime(h.created_at)}</p></div>
+        </div>`).join('')}
+      </div>
+    </div>`}
+  </div>`;
+}
+
+// ─────────────────────────────────────────
+// EXPORTAR
+// ─────────────────────────────────────────
+function showExportModal(){ document.getElementById('exportModal').classList.remove('hidden'); }
+function closeExportModal(){ document.getElementById('exportModal').classList.add('hidden'); }
+function exportCSV(){
+  const headers=['Título','Descripción','Responsables','Departamentos','Prioridad','Fecha Límite','Estado','Completada'];
+  const rows=state.tasks.map(t=>[
+    `"${t.title.replace(/"/g,'""')}"`,`"${(t.description||'').replace(/"/g,'""')}"`,
+    `"${(t.responsible||[]).join('; ')}"`,`"${(t.departments||[]).join('; ')}"`,
+    t.priority,t.due_date,getTaskColumn(t)||'completada',t.completed?'Sí':'No'
+  ]);
+  const csv='\uFEFF'+[headers.join(','),...rows.map(r=>r.join(','))].join('\n');
+  const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8;'})); a.download=`FactoryFlow_${todayStr()}.csv`; a.click();
+  closeExportModal(); showToast('CSV exportado','success');
+}
+function exportPDF(){
+  closeExportModal();
+  const w=window.open('','_blank');
+  w.document.write(`<!DOCTYPE html><html><head><title>FactoryFlow</title><style>body{font-family:sans-serif;padding:20px}table{width:100%;border-collapse:collapse;font-size:12px}th,td{padding:8px;border-bottom:1px solid #eee;text-align:left}th{background:#F5F4F0}@media print{@page{margin:15mm}}</style></head><body>
+  <h1 style="font-size:20px;margin-bottom:4px">FactoryFlow — Reporte</h1><p style="font-size:12px;color:#71717A;margin-bottom:16px">${new Date().toLocaleString('es-ES')}</p>
+  <table><thead><tr><th>Tarea</th><th>Departamentos</th><th>Responsables</th><th>Prioridad</th><th>Fecha</th><th>Estado</th></tr></thead><tbody>
+  ${state.tasks.map(t=>`<tr><td style="${t.completed?'text-decoration:line-through;color:#A1A1AA':''}">${t.title}</td><td>${(t.departments||[]).join(', ')}</td><td>${(t.responsible||[]).join(', ')}</td><td>${t.priority.toUpperCase()}</td><td>${formatDate(t.due_date)}</td><td>${t.completed?'Completada':getTaskColumn(t)||'—'}</td></tr>`).join('')}
+  </tbody></table></body></html>`);
+  w.document.close(); setTimeout(()=>w.print(),500);
+}
+
+// ─────────────────────────────────────────
+// INIT
+// ─────────────────────────────────────────
+async function init() {
+  const ok = initSupabase();
+  if (ok) {
+    setLoadingMsg('Cargando datos...');
+    await loadAll();
+    subscribeRealtime();
+    await autoCheckOverdue();
+  }
+  populateFilterDropdowns();
+  render();
+  hideLoading();
+
+  setInterval(autoCheckOverdue, 60000);
+
+  document.addEventListener('keydown', e => {
+    if(e.key==='Escape'){ closeTaskModal(); closeDetailModal(); closeExportModal(); closeManagementModal(); }
+    if((e.ctrlKey||e.metaKey)&&e.key==='k'){ e.preventDefault(); document.getElementById('searchInput').focus(); }
+  });
+  window.addEventListener('resize',()=>{
+    if(window.innerWidth>=768){ document.getElementById('sidebarOverlay').classList.remove('show'); document.getElementById('sidebar').classList.remove('open'); }
+  });
+}
+
+init();
+</script>
+</body>
+</html>
