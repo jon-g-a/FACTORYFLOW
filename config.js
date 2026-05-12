@@ -7,4 +7,4 @@
 // ================================================
 
 window.SUPABASE_URL      = 'https://ebtrcytywciyisfaetkc.supabase.co';
-window.SUPABASE_ANON_KEY = 'sb_publishable_4xgfMbpatd2mmXOdMT6LbA_fHJZnuak';
+window.SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVidHJjeXR5d2NpeWlzZmFldGtjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg0NjY5MTksImV4cCI6MjA5NDA0MjkxOX0.e0Kwbif7Ksy7jvaPtDvpuJoDySdyzWDhWL9Bv-eW-2A';
