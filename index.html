@@ -398,10 +398,9 @@
 // ─────────────────────────────────────────
 // SUPABASE CLIENT
 // ─────────────────────────────────────────
-let supabase = null;
+let sbClient = null;
 
 function initSupabase() {
-  // Comprobar credenciales
   if (!window.SUPABASE_URL || !window.SUPABASE_ANON_KEY ||
       window.SUPABASE_URL === 'TU_SUPABASE_URL' ||
       window.SUPABASE_ANON_KEY === 'TU_SUPABASE_ANON_KEY') {
@@ -411,23 +410,10 @@ function initSupabase() {
     setTimeout(() => hideLoading(), 1500);
     return false;
   }
-  // Intentar crear el cliente — la librería puede estar en window.supabase o window.supabase.createClient
   try {
-    const client = (window.supabase && window.supabase.createClient)
-      ? window.supabase.createClient
-      : (window.supabaseJs && window.supabaseJs.createClient)
-      ? window.supabaseJs.createClient
-      : null;
-
-    if (!client) {
-      document.getElementById('loadingMsg').textContent = 'Error: librería Supabase no cargada';
-      document.getElementById('dbStatus').textContent = 'Error CDN';
-      setTimeout(() => hideLoading(), 2000);
-      return false;
-    }
-
-    supabase = client(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
-    console.log('✅ Supabase cliente creado:', window.SUPABASE_URL);
+    // El CDN de supabase-js expone window.supabase.createClient
+    sbClient = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
+    console.log('✅ Supabase conectado:', window.SUPABASE_URL);
     return true;
   } catch(e) {
     console.error('❌ Error Supabase:', e);
@@ -482,13 +468,13 @@ function getFilteredTasks() {
 // DB — CARGA INICIAL
 // ─────────────────────────────────────────
 async function loadAll() {
-  if (!supabase) return;
+  if (!sbClient) return;
   setLoadingMsg('Cargando departamentos...');
   const [d, p, t, h] = await Promise.all([
-    supabase.from('departments').select('*').order('name'),
-    supabase.from('people').select('*').order('name'),
-    supabase.from('tasks').select('*, comments(*)').order('created_at', { ascending: false }),
-    supabase.from('history').select('*').order('created_at', { ascending: false }).limit(200),
+    sbClient.from('departments').select('*').order('name'),
+    sbClient.from('people').select('*').order('name'),
+    sbClient.from('tasks').select('*, comments(*)').order('created_at', { ascending: false }),
+    sbClient.from('history').select('*').order('created_at', { ascending: false }).limit(200),
   ]);
   state.departments = d.data || [];
   state.people = p.data || [];
@@ -506,17 +492,17 @@ async function loadAll() {
 // DB — TAREAS
 // ─────────────────────────────────────────
 async function dbCreateTask(data) {
-  const { data: row, error } = await supabase.from('tasks').insert([data]).select().single();
+  const { data: row, error } = await sbClient.from('tasks').insert([data]).select().single();
   if (error) { showToast('Error al guardar: '+error.message,'error'); return null; }
   return row;
 }
 async function dbUpdateTask(id, data) {
-  const { error } = await supabase.from('tasks').update(data).eq('id', id);
+  const { error } = await sbClient.from('tasks').update(data).eq('id', id);
   if (error) showToast('Error al actualizar: '+error.message,'error');
   return !error;
 }
 async function dbDeleteTask(id) {
-  const { error } = await supabase.from('tasks').delete().eq('id', id);
+  const { error } = await sbClient.from('tasks').delete().eq('id', id);
   if (error) { showToast('Error al eliminar: '+error.message,'error'); return false; }
   return true;
 }
@@ -525,7 +511,7 @@ async function dbDeleteTask(id) {
 // DB — COMENTARIOS
 // ─────────────────────────────────────────
 async function dbAddComment(task_id, author, text) {
-  const { data, error } = await supabase.from('comments').insert([{ task_id, author, text }]).select().single();
+  const { data, error } = await sbClient.from('comments').insert([{ task_id, author, text }]).select().single();
   if (error) { showToast('Error al comentar','error'); return null; }
   return data;
 }
@@ -534,7 +520,7 @@ async function dbAddComment(task_id, author, text) {
 // DB — HISTORIAL
 // ─────────────────────────────────────────
 async function dbAddHistory(action, detail) {
-  const { data } = await supabase.from('history').insert([{ action, detail }]).select().single();
+  const { data } = await sbClient.from('history').insert([{ action, detail }]).select().single();
   if (data) state.history.unshift(data);
 }
 
@@ -542,33 +528,33 @@ async function dbAddHistory(action, detail) {
 // DB — PERSONAS / DEPARTAMENTOS
 // ─────────────────────────────────────────
 async function dbCreatePerson(name, dept) {
-  const { data, error } = await supabase.from('people').insert([{ name, dept }]).select().single();
+  const { data, error } = await sbClient.from('people').insert([{ name, dept }]).select().single();
   if (error) { showToast('Error: '+error.message,'error'); return null; }
   return data;
 }
 async function dbDeletePerson(id) {
-  const { error } = await supabase.from('people').delete().eq('id', id);
+  const { error } = await sbClient.from('people').delete().eq('id', id);
   return !error;
 }
 async function dbCreateDept(name, color) {
-  const { data, error } = await supabase.from('departments').insert([{ name, color }]).select().single();
+  const { data, error } = await sbClient.from('departments').insert([{ name, color }]).select().single();
   if (error) { showToast('Error: '+error.message,'error'); return null; }
   return data;
 }
 async function dbDeleteDept(name) {
-  const { error } = await supabase.from('departments').delete().eq('name', name);
+  const { error } = await sbClient.from('departments').delete().eq('name', name);
   return !error;
 }
 async function dbUpdateDeptColor(name, color) {
-  await supabase.from('departments').update({ color }).eq('name', name);
+  await sbClient.from('departments').update({ color }).eq('name', name);
 }
 
 // ─────────────────────────────────────────
 // REALTIME
 // ─────────────────────────────────────────
 function subscribeRealtime() {
-  if (!supabase) return;
-  supabase.channel('ff-changes')
+  if (!sbClient) return;
+  sbClient.channel('ff-changes')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, async () => {
       await reloadTasks();
       render();
@@ -577,12 +563,12 @@ function subscribeRealtime() {
       await reloadTasks();
     })
     .on('postgres_changes', { event: '*', schema: 'public', table: 'departments' }, async () => {
-      const { data } = await supabase.from('departments').select('*').order('name');
+      const { data } = await sbClient.from('departments').select('*').order('name');
       state.departments = data || [];
       populateFilterDropdowns(); render();
     })
     .on('postgres_changes', { event: '*', schema: 'public', table: 'people' }, async () => {
-      const { data } = await supabase.from('people').select('*').order('name');
+      const { data } = await sbClient.from('people').select('*').order('name');
       state.people = data || [];
       populateFilterDropdowns();
     })
@@ -590,7 +576,7 @@ function subscribeRealtime() {
 }
 
 async function reloadTasks() {
-  const { data } = await supabase.from('tasks').select('*, comments(*)').order('created_at', { ascending: false });
+  const { data } = await sbClient.from('tasks').select('*, comments(*)').order('created_at', { ascending: false });
   state.tasks = (data||[]).map(t => ({ ...t, comments: t.comments||[], departments: t.departments||[], responsible: t.responsible||[] }));
   updateNotifBadge();
 }
