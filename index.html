@@ -401,6 +401,7 @@
 let supabase = null;
 
 function initSupabase() {
+  // Comprobar credenciales
   if (!window.SUPABASE_URL || !window.SUPABASE_ANON_KEY ||
       window.SUPABASE_URL === 'TU_SUPABASE_URL' ||
       window.SUPABASE_ANON_KEY === 'TU_SUPABASE_ANON_KEY') {
@@ -410,8 +411,31 @@ function initSupabase() {
     setTimeout(() => hideLoading(), 1500);
     return false;
   }
-  supabase = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
-  return true;
+  // Intentar crear el cliente — la librería puede estar en window.supabase o window.supabase.createClient
+  try {
+    const client = (window.supabase && window.supabase.createClient)
+      ? window.supabase.createClient
+      : (window.supabaseJs && window.supabaseJs.createClient)
+      ? window.supabaseJs.createClient
+      : null;
+
+    if (!client) {
+      document.getElementById('loadingMsg').textContent = 'Error: librería Supabase no cargada';
+      document.getElementById('dbStatus').textContent = 'Error CDN';
+      setTimeout(() => hideLoading(), 2000);
+      return false;
+    }
+
+    supabase = client(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
+    console.log('✅ Supabase cliente creado:', window.SUPABASE_URL);
+    return true;
+  } catch(e) {
+    console.error('❌ Error Supabase:', e);
+    document.getElementById('loadingMsg').textContent = 'Error: ' + e.message;
+    document.getElementById('dbStatus').textContent = 'Error';
+    setTimeout(() => hideLoading(), 2000);
+    return false;
+  }
 }
 
 // ─────────────────────────────────────────
@@ -1117,7 +1141,23 @@ async function init() {
   });
 }
 
-init();
+// Esperar a que el CDN de Supabase cargue antes de iniciar
+function waitForSupabaseAndInit() {
+  const ready = (window.supabase && typeof window.supabase.createClient === 'function')
+    || (window.supabaseJs && typeof window.supabaseJs.createClient === 'function');
+  if (ready) {
+    init();
+  } else {
+    console.warn('⏳ Esperando CDN Supabase...');
+    setTimeout(waitForSupabaseAndInit, 200);
+  }
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', waitForSupabaseAndInit);
+} else {
+  waitForSupabaseAndInit();
+}
 </script>
 </body>
 </html>
